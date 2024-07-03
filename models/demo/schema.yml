@@ -4,3 +4,41 @@ sources:
 - name: helloworld
   tables:
   - name: json_messages
+models:
+  - name: schema_data
+    description: "A schema properties using dbt model"
+    config:
+        contract:
+          enforced: true
+          # alias_types: false
+    columns:
+      - name: id
+        description: "The primary key for this table"
+        data_type: UInt64
+        constraints:
+          - type: not_null
+          - type: unique
+      - name: name
+        description: "Name of a person"
+        data_type: string
+        constraints:
+          - type: not_null
+      - name: gender
+        description: "Gender of a person"
+        data_type: string
+        constraints:
+          - type: check
+            expression: "id > 20"
+      - name: age
+        description: "Age of a person"
+        data_type: UInt64
+        data_tests:
+          - not_null
+        constraints:
+          - type: not_null
+      - name: birthdate
+        description: "Date of birth of a person"
+        data_type: Date
+      - name: created_at
+        description: "Timestamp when the entity is created"
+        data_type: DateTime
