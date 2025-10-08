@@ -32,14 +32,6 @@ jobs:
           curl -s "https://api.github.com/repos/$REPO/issues/events?per_page=100" \
             -H "Accept: application/vnd.github.v3+json" > events.json
 
-          # Filter labeled events for the desired tag and newer than last_id
-          jq -r --arg LABEL "$LABEL_TO_WATCH" --argjson LAST "$last_id" '
-            [ .[]
-              | select(.id > $LAST and .event=="labeled" and .label.name==$LABEL)
-              | "\(.id)|\(.label.name)|\(.issue.html_url)|\(.issue.title)"
-            ] | .[]
-          ' events.json > new_events.txt
-
           # Filter new labeled events for the target label
           jq -r --arg LABEL "$LABEL_TO_WATCH" --argjson LAST "$last_id" '
             [.[] | select(.id > $LAST and .event=="labeled" and .label.name==$LABEL)
@@ -51,11 +43,18 @@ jobs:
             echo "New labeled issues found:"
             cat new_events.txt
 
+            message="*Found new issues with label '\$LABEL_TO_WATCH':*\n"
+            max_id=$last_id
             while IFS='|' read -r id url title; do
-              payload=$(jq -n --arg text "<$url|$title>" '{text: $text}')
-              curl -s -X POST -H "Content-type: application/json" -d "$payload" "$SLACK_WEBHOOK_URL"
-              echo $id > "$last_id_file"
+              message="${message}- <${url}|${title}>\n"
+              max_id=$id
             done < new_events.txt
+
+            # Send single summary message to Slack
+            jq -n --arg text "$message" '{text: $text}' > payload.json
+            curl -s -X POST -H "Content-type: application/json" -d @payload.json "$SLACK_WEBHOOK_URL"
+
+            echo "$max_id" > "$last_id_file"
           else
             echo "No new labeled issues."
           fi
