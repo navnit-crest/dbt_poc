@@ -1,0 +1,67 @@
+name: GitHub Issue Tracker
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"  # every 5 minutes
+  workflow_dispatch:
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set environment variables
+        env:
+          REPO: ${{ secrets.REPOSITORY }}
+          LABEL_TO_WATCH: ${{ secrets.LABEL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          echo "Fetching GitHub events for repository ..."
+
+          # Load last processed event id (if any)
+          mkdir -p .cache
+          last_id_file=".cache/last_event_id.txt"
+          if [ -f "$last_id_file" ]; then
+            last_id=$(cat "$last_id_file")
+          else
+            last_id=0
+          fi
+          echo "Last processed ID: $last_id"
+
+          # Fetch issue events (100 most recent)
+          curl -s "https://api.github.com/repos/$REPO/issues/events?per_page=100" \
+            -H "Accept: application/vnd.github.v3+json" > events.json
+
+          # Filter labeled events for the desired tag and newer than last_id
+          jq -r --arg LABEL "$LABEL_TO_WATCH" --argjson LAST "$last_id" '
+            [ .[]
+              | select(.id > $LAST and .event=="labeled" and .label.name==$LABEL)
+              | "\(.id)|\(.label.name)|\(.issue.html_url)|\(.issue.title)"
+            ] | .[]
+          ' events.json > new_events.txt
+
+          # Filter new labeled events for the target label
+          jq -r --arg LABEL "$LABEL_TO_WATCH" --argjson LAST "$last_id" '
+            [.[] | select(.id > $LAST and .event=="labeled" and .label.name==$LABEL)
+             | "\(.id)|\(.issue.html_url)|\(.issue.title)"]
+            | .[]
+          ' events.json > new_events.txt
+
+          if [ -s new_events.txt ]; then
+            echo "New labeled issues found:"
+            cat new_events.txt
+
+            while IFS='|' read -r id url title; do
+              payload=$(jq -n --arg text "<$url|$title>" '{text: $text}')
+              curl -s -X POST -H "Content-type: application/json" -d "$payload" "$SLACK_WEBHOOK_URL"
+              echo $id > "$last_id_file"
+            done < new_events.txt
+          else
+            echo "No new labeled issues."
+          fi
+
+      - name: Cache last processed event ID
+        uses: actions/cache@v4
+        with:
+          path: .cache
+          key: last-event-cache
